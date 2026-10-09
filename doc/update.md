@@ -1,5 +1,11 @@
 # Update Log
 
+## 2026-10-09
+- **New Precision Option: `fp16`**: All TTS nodes now accept `precision: "fp16"` alongside `bf16` / `fp32`.
+  - Half precision loads natively on Turing (sm_75, e.g. T4) and newer GPUs, halving memory vs `fp32` and speeding up inference on pre-Ampere cards where `bf16` falls back to `fp32`.
+  - Existing behavior is unchanged: `bf16` still downgrades to `fp32` on pre-Ampere GPUs; MPS keeps its fp16 fast path.
+- **Tests**: Added `tests/test_transformers5_mask_shim.py` (locks the transformers>=5 `create_causal_mask` shim against the upstream #111 regression; runs without torch) and fp16 loading tests for T4/Ampere; fixed the numpy stub in `test_cuda_compatibility.py` so the suite runs without real torch/comfy installed.
+
 ## 2026-04-12 (v1.0.7)
 - **Removed `QwenTTSConfigNode`**: The global pause control node has been removed due to negative impact on audio quality.
   - Splitting text at punctuation and generating each segment independently caused **voice inconsistency** (different timbres within a single utterance), especially severe for `VoiceDesignNode`.

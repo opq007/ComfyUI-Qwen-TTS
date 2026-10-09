@@ -152,6 +152,10 @@ uses `eager` attention and changes `bf16` to `fp32`, including when `device` is
 `auto`. This conservative compatibility mode also overrides explicitly selected
 accelerated attention. FP32 uses more VRAM; the 0.6B model may be preferable.
 
+On Turing-class GPUs such as the T4 (compute capability 7.5), which have no
+native bf16 but accelerate fp16, prefer `precision=fp16`: it loads as fp16 and
+uses half the memory of fp32.
+
 Before downloading or loading weights on CUDA, a small kernel checks the runtime.
 `no kernel image is available for execution on the device` or `invalid device
 function` indicates that a CUDA kernel cannot run on the GPU. The error now
@@ -228,6 +232,7 @@ qwen-tts: D:\MyModels\Qwen
 
 ### Performance & Memory
 - **VRAM**: Use `bf16` precision to save significant memory with minimal quality loss.
+- **Pre-Ampere GPUs (e.g. T4)**: Use `precision: "fp16"` — bf16 is unavailable there (falls back to fp32), while fp16 runs with hardware acceleration.
 - **Attention**: Use `attention: "auto"` for automatic selection of fastest available mechanism.
 - **Model Unloading**: Enable `unload_model_after_generate` if you have limited VRAM (< 8GB) or need to run multiple different models.
 - **Local Models**: Pre-download weights to `models/qwen-tts/` to prioritize local loading and avoid HuggingFace timeouts.

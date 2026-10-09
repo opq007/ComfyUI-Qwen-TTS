@@ -442,6 +442,8 @@ def load_qwen_model(model_type: str, model_choice: str, device: str, precision: 
         dtype = torch.bfloat16
     elif device == "mps":
         dtype = torch.float16
+    elif precision == "fp16":
+        dtype = torch.float16
     else:
         dtype = torch.bfloat16 if precision == "bf16" else torch.float32
 	
@@ -657,7 +659,7 @@ class VoiceDesignNode:
                 "instruct": ("STRING", {"multiline": True, "default": "", "placeholder": "Style instruction (required for VoiceDesign)"}),
                 "model_choice": (["0.6B", "1.7B"], {"default": "1.7B"}),
                 "device": (["auto", "cuda", "xpu", "mps", "cpu"], {"default": "auto"}),
-                "precision": (["bf16", "fp32"], {"default": "bf16"}),
+                "precision": (["bf16", "fp16", "fp32"], {"default": "bf16", "tooltip": "fp16 suits pre-Ampere GPUs (e.g. T4) where bf16 is unavailable"}),
                 "language": (DEMO_LANGUAGES, {"default": "Auto"}),
             },
             "optional": {
@@ -748,7 +750,7 @@ class VoiceCloneNode:
                 "target_text": ("STRING", {"multiline": True, "default": "Good one. Okay, fine, I'm just gonna leave this sock monkey here. Goodbye."}),
                 "model_choice": (["0.6B", "1.7B"], {"default": "0.6B"}),
                 "device": (["auto", "cuda", "xpu", "mps", "cpu"], {"default": "auto"}),
-                "precision": (["bf16", "fp32"], {"default": "bf16"}),
+                "precision": (["bf16", "fp16", "fp32"], {"default": "bf16", "tooltip": "fp16 suits pre-Ampere GPUs (e.g. T4) where bf16 is unavailable"}),
                 "language": (DEMO_LANGUAGES, {"default": "Auto"}),
             },
             "optional": {
@@ -957,7 +959,7 @@ class CustomVoiceNode:
                 "speaker": (["Aiden", "Dylan", "Eric", "Ono_anna", "Ryan", "Serena", "Sohee", "Uncle_fu", "Vivian"], {"default": "Ryan"}),
                 "model_choice": (["0.6B", "1.7B"], {"default": "1.7B"}),
                 "device": (["auto", "cuda", "xpu", "mps", "cpu"], {"default": "auto"}),
-                "precision": (["bf16", "fp32"], {"default": "bf16"}),
+                "precision": (["bf16", "fp16", "fp32"], {"default": "bf16", "tooltip": "fp16 suits pre-Ampere GPUs (e.g. T4) where bf16 is unavailable"}),
                 "language": (DEMO_LANGUAGES, {"default": "Auto"}),
             },
             "optional": {
@@ -1060,7 +1062,7 @@ class VoiceClonePromptNode:
                 "ref_text": ("STRING", {"multiline": True, "default": "", "placeholder": "Reference audio text (highly recommended for better quality)"}),
                 "model_choice": (["0.6B", "1.7B"], {"default": "0.6B"}),
                 "device": (["auto", "cuda", "xpu", "mps", "cpu"], {"default": "auto"}),
-                "precision": (["bf16", "fp32"], {"default": "bf16"}),
+                "precision": (["bf16", "fp16", "fp32"], {"default": "bf16", "tooltip": "fp16 suits pre-Ampere GPUs (e.g. T4) where bf16 is unavailable"}),
                 "attention": (ATTENTION_OPTIONS, {"default": "auto", "tooltip": "Attention implementation"}),
             },
             "optional": {
@@ -1157,7 +1159,7 @@ class DialogueInferenceNode:
                 "role_bank": ("QWEN3_ROLE_BANK",),
                 "model_choice": (["0.6B", "1.7B"], {"default": "1.7B"}),
                 "device": (["auto", "cuda", "xpu", "mps", "cpu"], {"default": "auto"}),
-                "precision": (["bf16", "fp32"], {"default": "bf16"}),
+                "precision": (["bf16", "fp16", "fp32"], {"default": "bf16", "tooltip": "fp16 suits pre-Ampere GPUs (e.g. T4) where bf16 is unavailable"}),
                 "language": (DEMO_LANGUAGES, {"default": "Auto"}),
                 # RENAMED: pause_seconds -> pause_linebreak
                 # Linebreak Pause

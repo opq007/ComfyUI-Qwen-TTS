@@ -151,6 +151,9 @@
 注意力，并将 `bf16` 调整为 `fp32`；`device=auto` 时同样生效。
 这一保守兼容模式也会覆盖手动选择的加速注意力。FP32 占用更多显存，可考虑 0.6B 模型。
 
+对于 T4（计算能力 7.5）等 Turing 显卡：无原生 bf16 但有 fp16 硬件加速，
+建议选择 `precision=fp16`，将以 fp16 加载，显存占用为 fp32 的一半。
+
 CUDA 下载或加载权重前会先执行一个小型运算。若出现
 `no kernel image is available for execution on the device` 或 `invalid device function`，
 说明 CUDA 内核无法在该显卡执行。错误现在会包含显卡、PyTorch/CUDA 版本和构建架构，
@@ -223,6 +226,7 @@ qwen-tts: D:\MyAI\Models\Qwen
 
 ### 性能与内存
 - **显存**: 使用 `bf16` 精度可以在几乎不损失质量的情况下大幅节省内存。
+- **Ampere 之前的显卡（如 T4）**: 使用 `precision: "fp16"` — 这些显卡不支持 bf16（会回退到 fp32），而 fp16 可获得硬件加速。
 - **注意力**: 使用 `attention: "auto"` 自动选择最快的可用机制。
 - **模型卸载**: 如果显存有限（< 8GB）或需要运行多个不同模型，请启用 `unload_model_after_generate`。
 - **本地模型**: 预先将权重下载到 `models/qwen-tts/` 以优先进行本地加载，避免 HuggingFace 连接超时。

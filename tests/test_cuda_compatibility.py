@@ -33,6 +33,10 @@ class CudaCompatibilityTests(unittest.TestCase):
         package.__path__ = [str(ROOT)]
         transformers = types.ModuleType("transformers")
         transformers.pytorch_utils = types.ModuleType("transformers.pytorch_utils")
+        numpy = types.ModuleType("numpy")
+        # nodes.py evaluates `Tuple[np.ndarray, int]` annotations at class body
+        # time, so the stub must provide ndarray for the import to succeed.
+        numpy.ndarray = type("ndarray", (), {})
         folders = types.ModuleType("folder_paths")
         folders.models_dir = self.temp.name
         folders.__file__ = str(Path(self.temp.name) / "folder_paths.py")
@@ -47,7 +51,7 @@ class CudaCompatibilityTests(unittest.TestCase):
         qwen.VoiceClonePromptItem = Mock()
         modules = {
             "qwen_test_nodes": package, "torch": self.torch,
-            "numpy": types.ModuleType("numpy"), "folder_paths": folders,
+            "numpy": numpy, "folder_paths": folders,
             "comfy": comfy, "comfy.utils": comfy_utils,
             "transformers": transformers,
             "transformers.pytorch_utils": transformers.pytorch_utils,
@@ -80,6 +84,24 @@ class CudaCompatibilityTests(unittest.TestCase):
                 self.assertEqual(self.loader.call_args.kwargs, {
                     "device_map": "cuda", "dtype": "float32", "attn_implementation": "eager"})
         self.nodes.check_attention_implementation.assert_not_called()
+
+    def test_turing_keeps_fp16_but_downgrades_bf16(self):
+        # T4-class GPUs (sm_75) accelerate fp16 but have no native bf16.
+        self.torch.cuda.get_device_capability.return_value = (7, 5)
+        self.load(attention="eager", precision="fp16")
+        self.assertEqual(self.loader.call_args.kwargs, {
+            "device_map": "cuda", "dtype": "float16", "attn_implementation": "eager"})
+        self.nodes._MODEL_CACHE.clear()
+        self.load(attention="eager", precision="bf16")
+        self.assertEqual(self.loader.call_args.kwargs, {
+            "device_map": "cuda", "dtype": "float32", "attn_implementation": "eager"})
+
+    def test_ampere_loads_fp16_as_selected(self):
+        # fp16 stays fp16 on modern hardware too; no silent rewrite.
+        self.torch.cuda.get_device_capability.return_value = (8, 6)
+        self.load(attention="sdpa", precision="fp16")
+        self.assertEqual(self.loader.call_args.kwargs, {
+            "device_map": "cuda", "dtype": "float16", "attn_implementation": "sdpa"})
 
     def test_auto_device_resolves_before_compatibility_check(self):
         self.load(device="auto")
