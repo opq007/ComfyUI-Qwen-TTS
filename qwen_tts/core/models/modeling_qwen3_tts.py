@@ -1194,6 +1194,23 @@ class Qwen3TTSTalkerCodePredictorModel(Qwen3TTSPreTrainedModel):
         )
 
 
+def _fp32_logits_head(head, hidden_states):
+    """Compute a code-logits head in float32 when running in float16.
+
+    fp16's ~6.5e4 ceiling is too narrow for the code logits: the head matmul
+    overflows to +inf on store (the accumulator is fp32 but the output tensor
+    is not), and inf logits poison sampling with NaN probabilities, derailing
+    text conditioning (QwenLM/Qwen3-TTS#43, #355). bf16 and fp32 have a wide
+    enough range and run the head unchanged. The per-call weight cast is a few
+    MB against GEMMs orders of magnitude larger.
+    """
+    if hidden_states.dtype == torch.float16:
+        weight = head.weight.to(torch.float32)
+        bias = head.bias.to(torch.float32) if head.bias is not None else None
+        return F.linear(hidden_states.to(torch.float32), weight, bias)
+    return head(hidden_states)
+
+
 class Qwen3TTSTalkerCodePredictorModelForConditionalGeneration(Qwen3TTSPreTrainedModel, GenerationMixin):
     _tied_weights_keys = ["lm_head.weight"]
     _tp_plan = {"lm_head": "colwise_rep"}
@@ -1275,7 +1292,7 @@ class Qwen3TTSTalkerCodePredictorModelForConditionalGeneration(Qwen3TTSPreTraine
         
         logits = []
         for i in range(1, self.config.num_code_groups):
-            logits.append(self.lm_head[i-1](hidden_states[:, i]))
+            logits.append(_fp32_logits_head(self.lm_head[i-1], hidden_states[:, i]))
         logits = torch.stack(logits, dim=1)
 
         loss = None
@@ -1337,7 +1354,9 @@ class Qwen3TTSTalkerCodePredictorModelForConditionalGeneration(Qwen3TTSPreTraine
         )
 
         hidden_states = outputs.last_hidden_state
-        logits = self.lm_head[generation_steps](hidden_states)
+        # fp32 head for the same fp16 overflow reason as the talker's
+        # codec_head (QwenLM/Qwen3-TTS#43/#355).
+        logits = _fp32_logits_head(self.lm_head[generation_steps], hidden_states)
 
         loss = None
         if labels is not None:
@@ -1724,8 +1743,13 @@ class Qwen3TTSTalkerForConditionalGeneration(Qwen3TTSTalkerTextPreTrainedModel, 
         # Generate
         else:
             last_id_hidden = self.get_input_embeddings()(input_ids)
+            # Under an fp16 model the code predictor runs in fp32 (see
+            # Qwen3TTSForConditionalGeneration.from_pretrained), so tensors
+            # crossing the fp16 talker / fp32 predictor boundary are cast
+            # explicitly; uniform-dtype models pass through unchanged.
+            predictor_dtype = self.code_predictor.model.dtype
             predictor_result = self.code_predictor.generate(
-                inputs_embeds=torch.cat((past_hidden, last_id_hidden), dim=1),
+                inputs_embeds=torch.cat((past_hidden, last_id_hidden), dim=1).to(predictor_dtype),
                 max_new_tokens=self.config.num_code_groups - 1,
                 do_sample=subtalker_dosample,
                 top_p=subtalker_top_p,
@@ -1737,7 +1761,7 @@ class Qwen3TTSTalkerForConditionalGeneration(Qwen3TTSTalkerTextPreTrainedModel, 
             codec_ids = torch.cat((input_ids, predictor_result.sequences), dim=-1)
             codec_hiddens = torch.cat(
                 [last_id_hidden]
-                + [self.code_predictor.get_input_embeddings()[i](predictor_result.sequences[..., i:i+1]) for i in range(self.config.num_code_groups - 1)],
+                + [self.code_predictor.get_input_embeddings()[i](predictor_result.sequences[..., i:i+1]).to(last_id_hidden.dtype) for i in range(self.config.num_code_groups - 1)],
                 dim=1,
             )
             inputs_embeds = codec_hiddens.sum(1, keepdim=True)
@@ -1780,7 +1804,9 @@ class Qwen3TTSTalkerForConditionalGeneration(Qwen3TTSTalkerTextPreTrainedModel, 
         )
 
         hidden_states = outputs.last_hidden_state
-        logits = self.codec_head(hidden_states)
+        # See _fp32_logits_head: fp16 head outputs can overflow to inf and
+        # derail sampling (QwenLM/Qwen3-TTS#43/#355).
+        logits = _fp32_logits_head(self.codec_head, hidden_states)
 
         loss = None
         if labels is not None:
@@ -1938,6 +1964,18 @@ class Qwen3TTSForConditionalGeneration(Qwen3TTSPreTrainedModel, GenerationMixin)
             weights_only=weights_only,
             **kwargs,
         )
+        # The code predictor must run in float32 under an fp16 model: its MLP
+        # intermediate product `silu(gate(x)) * up(x)` legitimately exceeds
+        # float16's ~6.5e4 range in this bf16-trained checkpoint (measured
+        # ~1.4e5 on the 0.6B weights), so fp16 storage turns it into inf, the
+        # residual stream collapses to NaN, and generation derails from the
+        # text (QwenLM/Qwen3-TTS#43; bf16/fp32 run the same values fine). The
+        # predictor is the smallest transformer stack here, so fp32 costs
+        # little; the fp16 talker keeps the speed benefit. Tensors crossing
+        # the fp16 talker / fp32 predictor boundary are cast explicitly at the
+        # call sites below.
+        if model.talker.dtype == torch.float16:
+            model.talker.code_predictor.to(torch.float32)
         speech_tokenizer_path = cached_file(
             pretrained_model_name_or_path,
             "speech_tokenizer/config.json",
@@ -2026,7 +2064,10 @@ class Qwen3TTSForConditionalGeneration(Qwen3TTSPreTrainedModel, GenerationMixin)
             if i == 0:
                 codec_embed.append(self.talker.get_input_embeddings()(ref_code[:, :1]))
             else:
-                codec_embed.append(self.talker.code_predictor.get_input_embeddings()[i-1](ref_code[:, i:i+1]))
+                # cast back to the talker dtype: under an fp16 model the
+                # predictor runs in fp32 (see from_pretrained) and its
+                # embeddings concatenate with the talker's fp16 embeddings.
+                codec_embed.append(self.talker.code_predictor.get_input_embeddings()[i-1](ref_code[:, i:i+1]).to(self.talker.dtype))
         codec_embed = torch.cat(codec_embed, dim=1).sum(1).unsqueeze(0)
         codec_embed = torch.cat([self.talker.get_input_embeddings()(
                                     torch.tensor(

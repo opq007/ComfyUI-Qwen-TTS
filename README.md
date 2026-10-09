@@ -154,7 +154,12 @@ accelerated attention. FP32 uses more VRAM; the 0.6B model may be preferable.
 
 On Turing-class GPUs such as the T4 (compute capability 7.5), which have no
 native bf16 but accelerate fp16, prefer `precision=fp16`: it loads as fp16 and
-uses half the memory of fp32.
+uses half the memory of fp32. The model was trained in bf16, so under fp16 the
+`fp16` mode runs a fixed mixed-precision layout automatically: the 28-layer
+talker stays in fp16 for speed, while the small code predictor and the code
+logits heads compute in fp32 — their intermediate values legitimately exceed
+float16's range and would otherwise overflow to inf and derail the generated
+speech (see upstream QwenLM/Qwen3-TTS#43 and #355).
 
 Before downloading or loading weights on CUDA, a small kernel checks the runtime.
 `no kernel image is available for execution on the device` or `invalid device

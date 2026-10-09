@@ -153,6 +153,10 @@
 
 对于 T4（计算能力 7.5）等 Turing 显卡：无原生 bf16 但有 fp16 硬件加速，
 建议选择 `precision=fp16`，将以 fp16 加载，显存占用为 fp32 的一半。
+本模型使用 bf16 训练，fp16 模式会自动采用固定混合精度：28 层 talker 主体
+保持 fp16 以获得加速，而小体量的 code predictor 与 code logits head 以
+fp32 计算——它们的中间值天然超出 float16 的表示范围，否则会溢出为 inf
+并导致生成内容偏离文本（参见上游 QwenLM/Qwen3-TTS#43、#355）。
 
 CUDA 下载或加载权重前会先执行一个小型运算。若出现
 `no kernel image is available for execution on the device` 或 `invalid device function`，

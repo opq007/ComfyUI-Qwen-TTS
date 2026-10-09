@@ -3,8 +3,9 @@
 ## 2026-10-09
 - **New Precision Option: `fp16`**: All TTS nodes now accept `precision: "fp16"` alongside `bf16` / `fp32`.
   - Half precision loads natively on Turing (sm_75, e.g. T4) and newer GPUs, halving memory vs `fp32` and speeding up inference on pre-Ampere cards where `bf16` falls back to `fp32`.
+  - **fp16 correctness fix**: the model is trained in bf16, and the code predictor's MLP products legitimately exceed float16's ~6.5e4 range (measured ~1.4e5 on the 0.6B checkpoint). Raw fp16 storage turns them into `inf`, collapsing generation into NaN and producing speech unrelated to the text (upstream QwenLM/Qwen3-TTS#43, #355). Under an fp16 model the vendored code now runs the code predictor and the code logits heads in float32 automatically, keeping the 28-layer talker in fp16 for the speed benefit; tensors crossing the fp16/fp32 boundary are cast explicitly. Validated against the 0.6B checkpoint: fp16 greedy generation now matches fp32 for the first 96/119 steps (fp32-vs-fp16 rounding divergence afterwards is expected), and sampled generation no longer NaNs.
   - Existing behavior is unchanged: `bf16` still downgrades to `fp32` on pre-Ampere GPUs; MPS keeps its fp16 fast path.
-- **Tests**: Added `tests/test_transformers5_mask_shim.py` (locks the transformers>=5 `create_causal_mask` shim against the upstream #111 regression; runs without torch) and fp16 loading tests for T4/Ampere; fixed the numpy stub in `test_cuda_compatibility.py` so the suite runs without real torch/comfy installed.
+- **Tests**: Added `tests/test_transformers5_mask_shim.py` (locks the transformers>=5 `create_causal_mask` shim against the upstream #111 regression; runs without torch), `tests/test_fp16_logits_head.py` (encodes the fp16 logits overflow: raw head → inf, fixed head → finite fp32 matching the fp32 truth) and fp16 loading tests for T4/Ampere; fixed the numpy stub in `test_cuda_compatibility.py` so the suite runs without real torch/comfy installed.
 
 ## 2026-04-12 (v1.0.7)
 - **Removed `QwenTTSConfigNode`**: The global pause control node has been removed due to negative impact on audio quality.
